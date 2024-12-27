@@ -55,8 +55,13 @@ type BaseMessage struct {
 	RecvTime time.Time
 }
 
-type Transport interface {
-	Publish([]*flowmessage.FlowMessage)
+// TransformFunc takes in a message to decode and any other optional parameters
+// held in K (should be a struct). It returns a decoded message in the form of T
+// and any error if present
+type TransformFunc[T any, P any] func(any, P) ([]*T, error)
+
+type Transport[T any] interface {
+	Publish([]*T)
 }
 
 type DefaultLogTransport struct {

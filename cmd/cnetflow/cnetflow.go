@@ -7,6 +7,7 @@ import (
 	"os"
 	"runtime"
 
+	flowmessage "github.com/cloudflare/goflow/v3/pb"
 	"github.com/cloudflare/goflow/v3/transport"
 	"github.com/cloudflare/goflow/v3/utils"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -39,7 +40,7 @@ func init() {
 	transport.RegisterFlags()
 }
 
-func httpServer(state *utils.StateNetFlow) {
+func httpServer(state *utils.StateNetFlow[flowmessage.FlowMessage]) {
 	http.Handle(*MetricsPath, promhttp.Handler())
 	http.HandleFunc(*TemplatePath, state.ServeHTTPTemplates)
 	log.Fatal(http.ListenAndServe(*MetricsAddr, nil))
@@ -56,7 +57,7 @@ func main() {
 	lvl, _ := log.ParseLevel(*LogLevel)
 	log.SetLevel(lvl)
 
-	var defaultTransport utils.Transport
+	var defaultTransport utils.Transport[flowmessage.FlowMessage]
 	defaultTransport = &utils.DefaultLogTransport{}
 
 	switch *LogFmt {
@@ -69,7 +70,7 @@ func main() {
 
 	log.Info("Starting GoFlow")
 
-	s := &utils.StateNetFlow{
+	s := &utils.StateNetFlow[flowmessage.FlowMessage]{
 		Transport: defaultTransport,
 		Logger:    log.StandardLogger(),
 	}

@@ -5,17 +5,16 @@ import (
 	"time"
 
 	"github.com/cloudflare/goflow/v3/decoders/netflowlegacy"
-	flowmessage "github.com/cloudflare/goflow/v3/pb"
-	"github.com/cloudflare/goflow/v3/producer"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-type StateNFLegacy struct {
-	Transport Transport
-	Logger    Logger
+type StateNFLegacy[T any] struct {
+	Transport     Transport[T]
+	Logger        Logger
+	TransformFunc TransformFunc[T, any]
 }
 
-func (s *StateNFLegacy) DecodeFlow(msg interface{}) error {
+func (s *StateNFLegacy[T]) DecodeFlow(msg interface{}) error {
 	pkt := msg.(BaseMessage)
 	buf := bytes.NewBuffer(pkt.Payload)
 	key := pkt.Src.String()
@@ -24,10 +23,10 @@ func (s *StateNFLegacy) DecodeFlow(msg interface{}) error {
 		samplerAddress = samplerAddress.To4()
 	}
 
-	ts := uint64(time.Now().UTC().Unix())
-	if pkt.SetTime {
-		ts = uint64(pkt.RecvTime.UTC().Unix())
-	}
+	// ts := uint64(time.Now().UTC().Unix())
+	// if pkt.SetTime {
+	// 	ts = uint64(pkt.RecvTime.UTC().Unix())
+	// }
 
 	timeTrackStart := time.Now()
 	msgDec, err := netflowlegacy.DecodeMessage(buf)
@@ -62,8 +61,8 @@ func (s *StateNFLegacy) DecodeFlow(msg interface{}) error {
 			Add(float64(msgDecConv.Count))
 	}
 
-	var flowMessageSet []*flowmessage.FlowMessage
-	flowMessageSet, err = producer.ProcessMessageNetFlowLegacy(msgDec)
+	var flowMessageSet []*T
+	flowMessageSet, err = s.TransformFunc(msgDec, struct{}{})
 
 	timeTrackStop := time.Now()
 	DecoderTime.With(
@@ -72,10 +71,10 @@ func (s *StateNFLegacy) DecodeFlow(msg interface{}) error {
 		}).
 		Observe(float64((timeTrackStop.Sub(timeTrackStart)).Nanoseconds()) / 1000)
 
-	for _, fmsg := range flowMessageSet {
-		fmsg.TimeReceived = ts
-		fmsg.SamplerAddress = samplerAddress
-	}
+	// for _, fmsg := range flowMessageSet {
+	// 	fmsg.TimeReceived = ts
+	// 	fmsg.SamplerAddress = samplerAddress
+	// }
 
 	if s.Transport != nil {
 		s.Transport.Publish(flowMessageSet)
@@ -84,6 +83,6 @@ func (s *StateNFLegacy) DecodeFlow(msg interface{}) error {
 	return nil
 }
 
-func (s *StateNFLegacy) FlowRoutine(workers int, addr string, port int, reuseport bool) error {
+func (s *StateNFLegacy[T]) FlowRoutine(workers int, addr string, port int, reuseport bool) error {
 	return UDPRoutine("NetFlowV5", s.DecodeFlow, workers, addr, port, reuseport, s.Logger)
 }

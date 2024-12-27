@@ -6,27 +6,27 @@ import (
 	"time"
 
 	"github.com/cloudflare/goflow/v3/decoders/sflow"
-	flowmessage "github.com/cloudflare/goflow/v3/pb"
 	"github.com/cloudflare/goflow/v3/producer"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-type StateSFlow struct {
-	Transport Transport
-	Logger    Logger
+type StateSFlow[T any] struct {
+	Transport     Transport[T]
+	Logger        Logger
+	TransformFunc TransformFunc[T, *producer.SFlowProducerConfig]
 
 	Config *producer.SFlowProducerConfig
 }
 
-func (s *StateSFlow) DecodeFlow(msg interface{}) error {
+func (s *StateSFlow[T]) DecodeFlow(msg interface{}) error {
 	pkt := msg.(BaseMessage)
 	buf := bytes.NewBuffer(pkt.Payload)
 	key := pkt.Src.String()
 
-	ts := uint64(time.Now().UTC().Unix())
-	if pkt.SetTime {
-		ts = uint64(pkt.RecvTime.UTC().Unix())
-	}
+	// ts := uint64(time.Now().UTC().Unix())
+	// if pkt.SetTime {
+	// 	ts = uint64(pkt.RecvTime.UTC().Unix())
+	// }
 
 	timeTrackStart := time.Now()
 	msgDec, err := sflow.DecodeMessage(buf)
@@ -114,8 +114,8 @@ func (s *StateSFlow) DecodeFlow(msg interface{}) error {
 
 	}
 
-	var flowMessageSet []*flowmessage.FlowMessage
-	flowMessageSet, err = producer.ProcessMessageSFlowConfig(msgDec, s.Config)
+	var flowMessageSet []*T
+	flowMessageSet, err = s.TransformFunc(msgDec, s.Config)
 
 	timeTrackStop := time.Now()
 	DecoderTime.With(
@@ -124,11 +124,11 @@ func (s *StateSFlow) DecodeFlow(msg interface{}) error {
 		}).
 		Observe(float64((timeTrackStop.Sub(timeTrackStart)).Nanoseconds()) / 1000)
 
-	for _, fmsg := range flowMessageSet {
-		fmsg.TimeReceived = ts
-		fmsg.TimeFlowStart = ts
-		fmsg.TimeFlowEnd = ts
-	}
+	// for _, fmsg := range flowMessageSet {
+	// 	fmsg.TimeReceived = ts
+	// 	fmsg.TimeFlowStart = ts
+	// 	fmsg.TimeFlowEnd = ts
+	// }
 
 	if s.Transport != nil {
 		s.Transport.Publish(flowMessageSet)
@@ -137,6 +137,6 @@ func (s *StateSFlow) DecodeFlow(msg interface{}) error {
 	return nil
 }
 
-func (s *StateSFlow) FlowRoutine(workers int, addr string, port int, reuseport bool) error {
+func (s *StateSFlow[T]) FlowRoutine(workers int, addr string, port int, reuseport bool) error {
 	return UDPRoutine("sFlow", s.DecodeFlow, workers, addr, port, reuseport, s.Logger)
 }

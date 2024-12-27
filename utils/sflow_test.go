@@ -1,8 +1,10 @@
 package utils
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	flowmessage "github.com/cloudflare/goflow/v3/pb"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDecodeFlowExpandedSFlow(t *testing.T) {
@@ -12,7 +14,7 @@ func TestDecodeFlowExpandedSFlow(t *testing.T) {
 		Payload: getExpandedSFlowDecode(),
 	}
 
-	s := &StateSFlow{
+	s := &StateSFlow[flowmessage.FlowMessage]{
 		Transport: &DefaultLogTransport{},
 	}
 

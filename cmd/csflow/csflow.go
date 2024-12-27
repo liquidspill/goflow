@@ -7,6 +7,8 @@ import (
 	"os"
 	"runtime"
 
+	flowmessage "github.com/cloudflare/goflow/v3/pb"
+	"github.com/cloudflare/goflow/v3/producer"
 	"github.com/cloudflare/goflow/v3/transport"
 	"github.com/cloudflare/goflow/v3/utils"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -54,7 +56,7 @@ func main() {
 	lvl, _ := log.ParseLevel(*LogLevel)
 	log.SetLevel(lvl)
 
-	var defaultTransport utils.Transport
+	var defaultTransport utils.Transport[flowmessage.FlowMessage]
 	defaultTransport = &utils.DefaultLogTransport{}
 
 	switch *LogFmt {
@@ -67,9 +69,10 @@ func main() {
 
 	log.Info("Starting GoFlow")
 
-	s := &utils.StateSFlow{
-		Transport: defaultTransport,
-		Logger:    log.StandardLogger(),
+	s := &utils.StateSFlow[flowmessage.FlowMessage]{
+		Transport:     defaultTransport,
+		Logger:        log.StandardLogger(),
+		TransformFunc: producer.ProcessMessageSFlowConfig,
 	}
 
 	go httpServer()

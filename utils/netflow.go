@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/cloudflare/goflow/v3/decoders/netflow"
-	flowmessage "github.com/cloudflare/goflow/v3/pb"
 	"github.com/cloudflare/goflow/v3/producer"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -48,9 +47,10 @@ func (s *TemplateSystem) GetTemplate(version uint16, obsDomainId uint32, templat
 	return s.templates.GetTemplate(version, obsDomainId, templateId)
 }
 
-type StateNetFlow struct {
-	Transport     Transport
+type StateNetFlow[T any] struct {
+	Transport     Transport[T]
 	Logger        Logger
+	TransformFunc TransformFunc[T, producer.SamplingRateSystem]
 	templateslock *sync.RWMutex
 	templates     map[string]*TemplateSystem
 
@@ -58,7 +58,7 @@ type StateNetFlow struct {
 	sampling     map[string]producer.SamplingRateSystem
 }
 
-func (s *StateNetFlow) DecodeFlow(msg interface{}) error {
+func (s *StateNetFlow[T]) DecodeFlow(msg interface{}) error {
 	pkt := msg.(BaseMessage)
 	buf := bytes.NewBuffer(pkt.Payload)
 
@@ -90,10 +90,10 @@ func (s *StateNetFlow) DecodeFlow(msg interface{}) error {
 		s.samplinglock.Unlock()
 	}
 
-	ts := uint64(time.Now().UTC().Unix())
-	if pkt.SetTime {
-		ts = uint64(pkt.RecvTime.UTC().Unix())
-	}
+	// ts := uint64(time.Now().UTC().Unix())
+	// if pkt.SetTime {
+	// 	ts = uint64(pkt.RecvTime.UTC().Unix())
+	// }
 
 	timeTrackStart := time.Now()
 	msgDec, err := netflow.DecodeMessage(buf, templates)
@@ -131,7 +131,7 @@ func (s *StateNetFlow) DecodeFlow(msg interface{}) error {
 		return err
 	}
 
-	flowMessageSet := make([]*flowmessage.FlowMessage, 0)
+	flowMessageSet := make([]*T, 0)
 
 	switch msgDecConv := msgDec.(type) {
 	case netflow.NFv9Packet:
@@ -212,19 +212,20 @@ func (s *StateNetFlow) DecodeFlow(msg interface{}) error {
 					Add(float64(len(fsConv.Records)))
 			}
 		}
-		flowMessageSet, err = producer.ProcessMessageNetFlow(msgDecConv, sampling)
 
-		for _, fmsg := range flowMessageSet {
-			fmsg.TimeReceived = ts
-			fmsg.SamplerAddress = samplerAddress
-			timeDiff := fmsg.TimeReceived - fmsg.TimeFlowEnd
-			NetFlowTimeStatsSum.With(
-				prometheus.Labels{
-					"router":  key,
-					"version": "9",
-				}).
-				Observe(float64(timeDiff))
-		}
+		flowMessageSet, err = s.TransformFunc(msgDecConv, sampling)
+
+		// for _, fmsg := range flowMessageSet {
+		// fmsg.TimeReceived = ts
+		// fmsg.SamplerAddress = samplerAddress
+		// timeDiff := fmsg.TimeReceived - fmsg.FlowEndTime
+		// NetFlowTimeStatsSum.With(
+		// 	prometheus.Labels{
+		// 		"router":  key,
+		// 		"version": "9",
+		// 	}).
+		// 	Observe(float64(timeDiff))
+		// }
 	case netflow.IPFIXPacket:
 		NetFlowStats.With(
 			prometheus.Labels{
@@ -305,19 +306,20 @@ func (s *StateNetFlow) DecodeFlow(msg interface{}) error {
 					Add(float64(len(fsConv.Records)))
 			}
 		}
-		flowMessageSet, err = producer.ProcessMessageNetFlow(msgDecConv, sampling)
 
-		for _, fmsg := range flowMessageSet {
-			fmsg.TimeReceived = ts
-			fmsg.SamplerAddress = samplerAddress
-			timeDiff := fmsg.TimeReceived - fmsg.TimeFlowEnd
-			NetFlowTimeStatsSum.With(
-				prometheus.Labels{
-					"router":  key,
-					"version": "10",
-				}).
-				Observe(float64(timeDiff))
-		}
+		flowMessageSet, err = s.TransformFunc(msgDecConv, sampling)
+
+		// 	for _, fmsg := range flowMessageSet {
+		// 		fmsg.TimeReceived = ts
+		// 		fmsg.SamplerAddress = samplerAddress
+		// 		timeDiff := fmsg.TimeReceived - fmsg.FlowEndTime
+		// 		NetFlowTimeStatsSum.With(
+		// 			prometheus.Labels{
+		// 				"router":  key,
+		// 				"version": "10",
+		// 			}).
+		// 			Observe(float64(timeDiff))
+		// 	}
 	}
 
 	timeTrackStop := time.Now()
@@ -334,7 +336,7 @@ func (s *StateNetFlow) DecodeFlow(msg interface{}) error {
 	return nil
 }
 
-func (s *StateNetFlow) ServeHTTPTemplates(w http.ResponseWriter, r *http.Request) {
+func (s *StateNetFlow[T]) ServeHTTPTemplates(w http.ResponseWriter, r *http.Request) {
 	tmp := make(map[string]map[uint16]map[uint32]map[uint16]interface{})
 	s.templateslock.RLock()
 	for key, templatesrouterstr := range s.templates {
@@ -346,14 +348,14 @@ func (s *StateNetFlow) ServeHTTPTemplates(w http.ResponseWriter, r *http.Request
 	enc.Encode(tmp)
 }
 
-func (s *StateNetFlow) InitTemplates() {
+func (s *StateNetFlow[T]) InitTemplates() {
 	s.templates = make(map[string]*TemplateSystem)
 	s.templateslock = &sync.RWMutex{}
 	s.sampling = make(map[string]producer.SamplingRateSystem)
 	s.samplinglock = &sync.RWMutex{}
 }
 
-func (s *StateNetFlow) FlowRoutine(workers int, addr string, port int, reuseport bool) error {
+func (s *StateNetFlow[T]) FlowRoutine(workers int, addr string, port int, reuseport bool) error {
 	s.InitTemplates()
 	return UDPRoutine("NetFlow", s.DecodeFlow, workers, addr, port, reuseport, s.Logger)
 }
