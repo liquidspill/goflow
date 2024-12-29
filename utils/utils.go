@@ -60,6 +60,19 @@ type BaseMessage struct {
 // and any error if present
 type TransformFunc[T any, P any] func(any, P) ([]*T, error)
 
+type PostProcessFunc[T any] func(*T, PostProcessInput)
+
+type FlowStatsFunc[T any] func(*T) Stats
+
+type Stats struct {
+	ProcessingTime uint64
+}
+
+type PostProcessInput struct {
+	TimeReceived   uint64
+	SamplerAddress net.IP
+}
+
 type Transport[T any] interface {
 	Publish([]*T)
 }

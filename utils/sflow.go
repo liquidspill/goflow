@@ -11,9 +11,11 @@ import (
 )
 
 type StateSFlow[T any] struct {
-	Transport     Transport[T]
-	Logger        Logger
-	TransformFunc TransformFunc[T, *producer.SFlowProducerConfig]
+	Transport Transport[T]
+	Logger    Logger
+
+	TransformFunc   TransformFunc[T, *producer.SFlowProducerConfig]
+	PostProcessFunc PostProcessFunc[T]
 
 	Config *producer.SFlowProducerConfig
 }
@@ -23,10 +25,10 @@ func (s *StateSFlow[T]) DecodeFlow(msg interface{}) error {
 	buf := bytes.NewBuffer(pkt.Payload)
 	key := pkt.Src.String()
 
-	// ts := uint64(time.Now().UTC().Unix())
-	// if pkt.SetTime {
-	// 	ts = uint64(pkt.RecvTime.UTC().Unix())
-	// }
+	ts := uint64(time.Now().UTC().Unix())
+	if pkt.SetTime {
+		ts = uint64(pkt.RecvTime.UTC().Unix())
+	}
 
 	timeTrackStart := time.Now()
 	msgDec, err := sflow.DecodeMessage(buf)
@@ -124,11 +126,11 @@ func (s *StateSFlow[T]) DecodeFlow(msg interface{}) error {
 		}).
 		Observe(float64((timeTrackStop.Sub(timeTrackStart)).Nanoseconds()) / 1000)
 
-	// for _, fmsg := range flowMessageSet {
-	// 	fmsg.TimeReceived = ts
-	// 	fmsg.TimeFlowStart = ts
-	// 	fmsg.TimeFlowEnd = ts
-	// }
+	for _, fmsg := range flowMessageSet {
+		s.PostProcessFunc(fmsg, PostProcessInput{
+			TimeReceived: ts,
+		})
+	}
 
 	if s.Transport != nil {
 		s.Transport.Publish(flowMessageSet)

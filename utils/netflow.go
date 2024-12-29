@@ -48,9 +48,13 @@ func (s *TemplateSystem) GetTemplate(version uint16, obsDomainId uint32, templat
 }
 
 type StateNetFlow[T any] struct {
-	Transport     Transport[T]
-	Logger        Logger
-	TransformFunc TransformFunc[T, producer.SamplingRateSystem]
+	Transport Transport[T]
+	Logger    Logger
+
+	TransformFunc   TransformFunc[T, producer.SamplingRateSystem]
+	PostProcessFunc PostProcessFunc[T]
+	FlowStatsFunc   FlowStatsFunc[T]
+
 	templateslock *sync.RWMutex
 	templates     map[string]*TemplateSystem
 
@@ -90,10 +94,10 @@ func (s *StateNetFlow[T]) DecodeFlow(msg interface{}) error {
 		s.samplinglock.Unlock()
 	}
 
-	// ts := uint64(time.Now().UTC().Unix())
-	// if pkt.SetTime {
-	// 	ts = uint64(pkt.RecvTime.UTC().Unix())
-	// }
+	ts := uint64(time.Now().UTC().Unix())
+	if pkt.SetTime {
+		ts = uint64(pkt.RecvTime.UTC().Unix())
+	}
 
 	timeTrackStart := time.Now()
 	msgDec, err := netflow.DecodeMessage(buf, templates)
@@ -215,17 +219,18 @@ func (s *StateNetFlow[T]) DecodeFlow(msg interface{}) error {
 
 		flowMessageSet, err = s.TransformFunc(msgDecConv, sampling)
 
-		// for _, fmsg := range flowMessageSet {
-		// fmsg.TimeReceived = ts
-		// fmsg.SamplerAddress = samplerAddress
-		// timeDiff := fmsg.TimeReceived - fmsg.FlowEndTime
-		// NetFlowTimeStatsSum.With(
-		// 	prometheus.Labels{
-		// 		"router":  key,
-		// 		"version": "9",
-		// 	}).
-		// 	Observe(float64(timeDiff))
-		// }
+		for _, fmsg := range flowMessageSet {
+			s.PostProcessFunc(fmsg, PostProcessInput{
+				TimeReceived:   ts,
+				SamplerAddress: samplerAddress,
+			})
+			NetFlowTimeStatsSum.With(
+				prometheus.Labels{
+					"router":  key,
+					"version": "9",
+				}).
+				Observe(float64(s.FlowStatsFunc(fmsg).ProcessingTime))
+		}
 	case netflow.IPFIXPacket:
 		NetFlowStats.With(
 			prometheus.Labels{
@@ -309,17 +314,19 @@ func (s *StateNetFlow[T]) DecodeFlow(msg interface{}) error {
 
 		flowMessageSet, err = s.TransformFunc(msgDecConv, sampling)
 
-		// 	for _, fmsg := range flowMessageSet {
-		// 		fmsg.TimeReceived = ts
-		// 		fmsg.SamplerAddress = samplerAddress
-		// 		timeDiff := fmsg.TimeReceived - fmsg.FlowEndTime
-		// 		NetFlowTimeStatsSum.With(
-		// 			prometheus.Labels{
-		// 				"router":  key,
-		// 				"version": "10",
-		// 			}).
-		// 			Observe(float64(timeDiff))
-		// 	}
+		for _, fmsg := range flowMessageSet {
+			s.PostProcessFunc(fmsg, PostProcessInput{
+				TimeReceived:   ts,
+				SamplerAddress: samplerAddress,
+			})
+
+			NetFlowTimeStatsSum.With(
+				prometheus.Labels{
+					"router":  key,
+					"version": "10",
+				}).
+				Observe(float64(s.FlowStatsFunc(fmsg).ProcessingTime))
+		}
 	}
 
 	timeTrackStop := time.Now()

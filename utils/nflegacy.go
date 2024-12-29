@@ -9,9 +9,12 @@ import (
 )
 
 type StateNFLegacy[T any] struct {
-	Transport     Transport[T]
-	Logger        Logger
-	TransformFunc TransformFunc[T, any]
+	Transport Transport[T]
+	Logger    Logger
+
+	TransformFunc   TransformFunc[T, any]
+	PostProcessFunc PostProcessFunc[T]
+	FlowStatsFunc   FlowStatsFunc[T]
 }
 
 func (s *StateNFLegacy[T]) DecodeFlow(msg interface{}) error {
@@ -23,10 +26,10 @@ func (s *StateNFLegacy[T]) DecodeFlow(msg interface{}) error {
 		samplerAddress = samplerAddress.To4()
 	}
 
-	// ts := uint64(time.Now().UTC().Unix())
-	// if pkt.SetTime {
-	// 	ts = uint64(pkt.RecvTime.UTC().Unix())
-	// }
+	ts := uint64(time.Now().UTC().Unix())
+	if pkt.SetTime {
+		ts = uint64(pkt.RecvTime.UTC().Unix())
+	}
 
 	timeTrackStart := time.Now()
 	msgDec, err := netflowlegacy.DecodeMessage(buf)
@@ -71,10 +74,12 @@ func (s *StateNFLegacy[T]) DecodeFlow(msg interface{}) error {
 		}).
 		Observe(float64((timeTrackStop.Sub(timeTrackStart)).Nanoseconds()) / 1000)
 
-	// for _, fmsg := range flowMessageSet {
-	// 	fmsg.TimeReceived = ts
-	// 	fmsg.SamplerAddress = samplerAddress
-	// }
+	for _, fmsg := range flowMessageSet {
+		s.PostProcessFunc(fmsg, PostProcessInput{
+			TimeReceived:   ts,
+			SamplerAddress: samplerAddress,
+		})
+	}
 
 	if s.Transport != nil {
 		s.Transport.Publish(flowMessageSet)
